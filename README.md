@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="static/whale.svg" alt="WHALE logo" width="112">
+</p>
+
 # WHALE
 
 **WHALE** — Writing Hub for Academic LaTeX Environments.
