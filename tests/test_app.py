@@ -55,7 +55,11 @@ def test_compile_error(tmp_path, monkeypatch):
     r = c.post("/api/compile", json={"name": "main.tex"})
     j = r.get_json()
     assert j["ok"] is False
-    assert "! Undefined control sequence" in "\n".join(j["errors"])
+    msgs = "\n".join(j["errors"]) + "\n" + "\n".join(
+        loc["message"] for loc in j.get("error_locations", []))
+    assert "Undefined control sequence" in msgs
+    assert j["error_locations"], "Fehlerorte fehlen"
+    assert j["error_locations"][0]["file"].endswith("main.tex")
 
 
 def test_pdf(tmp_path, monkeypatch):
@@ -237,6 +241,7 @@ def test_model_tier_mapping():
     assert appmod.classify_model_tier("tud-ai/alias-huge") == "strong"
     assert appmod.classify_model_tier("tud-ai/openai/gpt-oss-120b") == "strong"
     assert appmod.classify_model_tier("ollama/qwen2.5:7b-fast") == "light"
+    assert appmod.classify_model_tier("groq/llama-3.1-8b-instant") == "light"
     assert appmod.classify_model_tier("tud-ai/alias-code") == "standard"
     assert appmod.classify_model_tier("minimax/minimax-m3") == "strong"
 
@@ -283,3 +288,30 @@ def test_activity_endpoint(tmp_path, monkeypatch):
     # seit "jetzt" -> keine alten Events
     d = c.get(f"/api/activity?since={d['now'] + 1}").get_json()
     assert d["events"] == []
+
+
+def test_snapshots_restore(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    # Snapshot manuell anlegen
+    d = c.post("/api/snapshots").get_json()
+    assert d["ok"] is True
+    snap = d["id"]
+    (tmp_path / "main.tex").write_text("\\documentclass{article}\\begin{document}Neu\\end{document}",
+                                       encoding="utf-8")
+    lst = c.get("/api/snapshots").get_json()["snapshots"]
+    assert any(s["id"] == snap for s in lst)
+    r = c.post("/api/restore", json={"id": snap})
+    assert r.get_json()["ok"] is True
+    assert "documentclass" in (tmp_path / "main.tex").read_text()
+
+
+def test_restore_rejects_traversal(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/api/restore", json={"id": "../../etc"})
+    assert r.status_code == 400
+
+
+def test_agent_fix_without_terminal(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/api/agent/fix", json={})
+    assert r.status_code == 409

@@ -39,3 +39,9 @@ Keine langen Zwischenerklärungen — nur diese Statuszeilen plus Treffer/Ergebn
 Je nach Modellstärke ist ein Stufen-Agent aktiv (`whale-strong`, `whale-standard`,
 `whale-light`). Dessen Prompt ergänzt dieses Protokoll um das passende Arbeitstempo.
 Die Stufe wird automatisch aus dem gewählten Modell bestimmt (⚙️-Button in der GUI).
+
+**Stufe C = Gleichstand durch Protokoll:** `whale-light` ist so gebaut, dass auch
+kleine Modelle dieselben Compile/Fix-Ergebnisse erreichen wie starke Modelle.
+Das Protokoll ersetzt Modellstärke: identische Kommandos, ein Schritt = eine Datei
+und eine Stelle, wörtliche Log-Zitate, Verifikation nach jedem Schritt und ein
+harter Stopp nach 2 erfolglosen Wiederholungen (statt endlosem Herumprobieren).

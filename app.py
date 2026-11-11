@@ -191,7 +191,8 @@ STRONG_HINTS = (
     "glm-5.3", "minimax-m3", "llama-3.3-70b", "qwen3.8-27b",
     "deepseek-v4.1", "mistral-large",
 )
-LIGHT_HINTS = ("qwen2.5:7b", "7b-fast", ":7b", "3b", "1.5b", "mini")
+LIGHT_HINTS = ("qwen2.5:7b", "7b-fast", ":7b", "3b", "1.5b", "mini",
+               "8b-instant", "llama-3.1-8b", "gemma-4-31b")
 
 
 def classify_model_tier(model: str) -> str:
@@ -225,6 +226,48 @@ def ensure_default_agent(project_dir: Path) -> str:
         except Exception:
             pass
     return agent
+
+
+HISTORY_DIRNAME = ".history"
+
+
+def _snapshot_project(project_dir: Path, reason: str = "auto") -> str | None:
+    """Kopiert .tex/.bib/.sty-Dateien nach .history/<ts>-<reason>/."""
+    hist = project_dir / HISTORY_DIRNAME
+    try:
+        hist.mkdir(exist_ok=True)
+        # Throttle: nicht öfter als einmal pro 45 s
+        existing = sorted((d for d in hist.iterdir() if d.is_dir()),
+                          key=lambda d: d.name)
+        if existing:
+            try:
+                newest_age = time.time() - existing[-1].stat().st_mtime
+                if newest_age < 45 and reason == "auto":
+                    return existing[-1].name
+            except OSError:
+                pass
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        snap = hist / f"{stamp}-{reason}"
+        snap.mkdir()
+        for f in project_dir.rglob("*"):
+            rel = f.relative_to(project_dir)
+            if any(part.startswith(".") or part == "build" for part in rel.parts):
+                continue
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in (".tex", ".bib", ".sty", ".cls"):
+                continue
+            dest = snap / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+        # Aufräumen: nur die letzten 30 behalten
+        dirs = sorted(d for d in hist.iterdir() if d.is_dir())
+        for d in dirs[:-30]:
+            shutil.rmtree(d, ignore_errors=True)
+        return snap.name
+    except Exception as e:
+        print(f"[snapshot] Fehler: {e}", flush=True)
+        return None
 
 
 class TtydManager:
@@ -296,9 +339,11 @@ class TtydManager:
         try:
             self.proc = subprocess.Popen(
                 [TTYD_BIN, "-p", str(TTYD_PORT), "-W",
-                 "tmux", "-f", "/dev/null", "new-session", "-A",
+                 "tmux", "-f", "/dev/null", "new-session", "-A", "-D",
                  "-s", sess, "-c", str(project_dir), "opencode",
-                 ";", "set-option", "-g", "status", "off"],
+                 ";", "set-option", "-g", "status", "off",
+                 ";", "set-option", "-g", "window-size", "latest",
+                 ";", "set-option", "-g", "aggressive-resize", "on"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
@@ -853,11 +898,22 @@ def create_app(project_dir: Path | None = None) -> Flask:
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
+    def rel_clean(path_str: str) -> str:
+        ps = path_str.strip()
+        try:
+            pth = Path(ps)
+            if pth.is_absolute():
+                return pth.resolve().relative_to(proj()).as_posix()
+        except Exception:
+            pass
+        return ps.lstrip("./")
+
     def compile_main() -> dict:
         root = proj()
         outdir = root / "build"
+        _snapshot_project(root, "vor-compile")
         base_cmd = ["latexmk", "-pdf", "-synctex=1", "-interaction=nonstopmode",
-                    f"-outdir={outdir}", "main.tex"]
+                    "-file-line-error", f"-outdir={outdir}", "main.tex"]
         t0 = time.time()
         try:
             r = subprocess.run(base_cmd, cwd=root, capture_output=True,
@@ -878,8 +934,25 @@ def create_app(project_dir: Path | None = None) -> Flask:
             pass
         ok = r.returncode == 0 and (outdir / "main.pdf").exists()
         errors = [ln for ln in log.splitlines() if ln.startswith("!")][:5]
+        # Fehlerorte aus -file-line-error:  ./datei.tex:42: Meldung
+        locations = []
+        seen = set()
+        for ln in log.splitlines():
+            m = re.match(r"^\.?/?(.+?\.tex):(\d+):\s*(.+)$", ln.strip())
+            if not m:
+                continue
+            f, line_no, msg = m.groups()
+            key = (f, line_no)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append({"file": rel_clean(f), "line": int(line_no),
+                              "message": msg.strip()[:200]})
+            if len(locations) >= 20:
+                break
         return {"ok": ok, "seconds": round(time.time() - t0, 1),
-                "log": log[-20000:], "errors": errors}
+                "log": log[-20000:], "errors": errors,
+                "error_locations": locations}
 
     @app.post("/api/compile")
     def compile_route():
@@ -1032,6 +1105,69 @@ def create_app(project_dir: Path | None = None) -> Flask:
         (proj() / ".chat-history.json").write_text("[]")
         return jsonify(ok=True)
 
+    # ============================================================
+    #  Versionen (Snapshots) + Agent-Fix
+    # ============================================================
+
+    @app.get("/api/snapshots")
+    def list_snapshots():
+        hist = proj() / HISTORY_DIRNAME
+        items = []
+        if hist.exists():
+            for d in sorted((x for x in hist.iterdir() if x.is_dir()),
+                            key=lambda x: x.name, reverse=True):
+                items.append({"id": d.name})
+        return jsonify(snapshots=items[:40])
+
+    @app.post("/api/snapshots")
+    def create_snapshot():
+        name = _snapshot_project(proj(), "manuell")
+        return (jsonify(ok=True, id=name) if name
+                else (jsonify(error="Snapshot fehlgeschlagen"), 500))
+
+    @app.post("/api/restore")
+    def restore_snapshot():
+        data = request.get_json(silent=True) or {}
+        snap_id = (data.get("id") or "").strip()
+        hist = (proj() / HISTORY_DIRNAME).resolve()
+        snap = (hist / snap_id).resolve()
+        if (not snap_id or not snap.is_relative_to(hist)
+                or not snap.is_dir() or ".." in snap_id):
+            return jsonify(error="invalid snapshot"), 400
+        _snapshot_project(proj(), "vor-restore")
+        restored = 0
+        for f in snap.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(snap)
+            dest = proj() / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+            restored += 1
+        return jsonify(ok=True, restored=restored)
+
+    @app.post("/api/agent/fix")
+    def agent_fix():
+        """Schickt einen Fix-Auftrag an den opencode-Agenten (tmux send-keys)."""
+        data = request.get_json(silent=True) or {}
+        msg = (data.get("message") or
+               "Lies build/compile.log und behebe alle Compile-Fehler. "
+               "Kompiliere danach erneut.")
+        if not TTYD.enabled:
+            return jsonify(error="Agent-Terminal nicht aktiv"), 409
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "-", proj().name)[:40] or "proj"
+        sess = "whale-agent-" + safe
+        r = subprocess.run(["tmux", "has-session", "-t", sess],
+                           capture_output=True)
+        if r.returncode != 0:
+            return jsonify(error="Agent-Session nicht gefunden — Terminal einmal öffnen"), 409
+        # Text senden (literal, kein Key-Interpreting) + Enter
+        subprocess.run(["tmux", "send-keys", "-t", sess, "-l", msg],
+                       capture_output=True)
+        subprocess.run(["tmux", "send-keys", "-t", sess, "Enter"],
+                       capture_output=True)
+        return jsonify(ok=True, session=sess)
+
     # Aktivität: welche Dateien wurden seit <since> geändert (Agent-Beobachtung)
     @app.get("/api/activity")
     def activity():
@@ -1054,6 +1190,8 @@ def create_app(project_dir: Path | None = None) -> Flask:
             if mt > since:
                 events.append({"name": rel.as_posix(), "mtime": mt})
         events.sort(key=lambda e: e["mtime"])
+        if events:
+            _snapshot_project(root, "agent-aktiv")
         return jsonify(events=events[-20:], now=time.time())
 
     # Terminal-Status: prüft ttyd und startet ihn bei Bedarf neu (Selbstheilung)

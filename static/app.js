@@ -26,7 +26,15 @@ const handlePdfEl = document.getElementById("handle-pdf");
 const handleTerminalEl = document.getElementById("handle-terminal");
 const errorPanel = document.getElementById("error-panel");
 const errorLogEl = document.getElementById("error-log");
+const errorLocationsEl = document.getElementById("error-locations");
 const errorCloseBtn = document.getElementById("error-close");
+const agentFixBtn = document.getElementById("agent-fix");
+const snapshotToggleBtn = document.getElementById("snapshot-toggle");
+const snapshotModal = document.getElementById("snapshot-modal");
+const snapshotListEl = document.getElementById("snapshot-list");
+const snapshotCloseBtn = document.getElementById("snapshot-close");
+const snapshotNowBtn = document.getElementById("snapshot-now");
+const snapshotInfoEl = document.getElementById("snapshot-info");
 const projectSelectEl = document.getElementById("project-select");
 const projectImportBtn = document.getElementById("project-import");
 const projectCreateBtn = document.getElementById("project-create");
@@ -34,6 +42,7 @@ const projectCreateBtn = document.getElementById("project-create");
 let currentFile = "main.tex";
 let programmaticChange = false;  // unterdrückt Auto-Save bei setValue()
 let lastOwnSave = 0;             // Zeitpunkt des letzten eigenen Speicherns
+let errorLineMarks = [];         // markierte Fehlerzeilen im Editor
 let editor = null;
 let lastDiskContent = "";
 let saveTimer = null;
@@ -110,11 +119,31 @@ const agentModelSelect = document.getElementById("agent-model-select");
 const agentProjectEl = document.getElementById("agent-project");
 const agentSaveBtn = document.getElementById("agent-save");
 const agentCloseBtn = document.getElementById("agent-close");
+const agentTierHintEl = document.getElementById("agent-tier-hint");
+
+const TIER_HINTS = {
+  strong: "Stufe A – starkes Modell: autonome Compile/Fix-Schleife, bis 5 Iterationen.",
+  standard: "Stufe B – mittleres Modell: strikt schrittweise, eine Datei pro Schritt.",
+  light: "Stufe C – kleines Modell: deterministisches Protokoll. Erreicht beim " +
+         "Compile/Fix dieselben Ergebnisse wie ein starkes Modell (gleiche Kommandos, " +
+         "1 Stelle pro Schritt, Verifikation, harter Stopp statt Raten)."
+};
+
+function updateAgentTierHint() {
+  if (!agentTierHintEl) return;
+  const opt = agentModelSelect.selectedOptions[0];
+  const id = opt ? opt.value : "";
+  const m = (agentModelsCache || []).find(x => x.id === id);
+  agentTierHintEl.textContent = m ? (TIER_HINTS[m.tier] || "") : "";
+}
+
+let agentModelsCache = [];
 
 async function openAgentSettings() {
   try {
     const res = await fetch("/api/agent/model");
     const d = await res.json();
+    agentModelsCache = d.models || [];
     agentModelSelect.innerHTML = "";
     const groups = {};
     (d.models || []).forEach(m => {
@@ -131,6 +160,7 @@ async function openAgentSettings() {
       groups[m.provider].appendChild(opt);
     });
     if (d.current) agentModelSelect.value = d.current;
+    updateAgentTierHint();
     agentProjectEl.textContent =
       `${d.project} · Modell: ${d.source} · Agent: ${d.agent || "–"} (Stufe ${d.tier || "?"})`;
     agentModal.hidden = false;
@@ -140,6 +170,7 @@ async function openAgentSettings() {
 }
 
 if (agentSettingsBtn) agentSettingsBtn.onclick = openAgentSettings;
+if (agentModelSelect) agentModelSelect.onchange = updateAgentTierHint;
 if (agentCloseBtn) agentCloseBtn.onclick = () => { agentModal.hidden = true; };
 if (agentModal) agentModal.onclick = (e) => {
   if (e.target === agentModal) agentModal.hidden = true;
@@ -641,6 +672,7 @@ pdfContainer.addEventListener("dblclick", async (e) => {
 
 async function compile() {
   statusEl.textContent = "Kompiliere…";
+  clearErrorMarks();
   const res = await fetch(API.compile, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -653,7 +685,7 @@ async function compile() {
     hideErrorPanel();
   } else {
     statusEl.textContent = `❌ ${d.errors[0] || "Fehler"}`;
-    showErrorLog(d.log || "Kein Log verfügbar");
+    showErrorLog(d.log || "Kein Log verfügbar", d.error_locations || []);
   }
 }
 
@@ -663,10 +695,116 @@ compileBtn.onclick = compile;
 //  ERROR-PANEL
 // ============================================
 
-function showErrorLog(logText) {
+function showErrorLog(logText, locations = []) {
   if (errorLogEl) errorLogEl.textContent = logText;
+  if (errorLocationsEl) {
+    errorLocationsEl.innerHTML = "";
+    locations.forEach(loc => {
+      const b = document.createElement("button");
+      b.className = "error-loc-btn";
+      b.textContent = `${loc.file}:${loc.line}`;
+      b.title = loc.message || "";
+      b.onclick = () => jumpToLocation(loc.file, loc.line);
+      errorLocationsEl.appendChild(b);
+    });
+  }
+  markErrorLines(locations);
   if (errorPanel) errorPanel.hidden = false;
 }
+
+function clearErrorMarks() {
+  errorLineMarks.forEach(n => editor.removeLineClass(n, "background", "cm-error-line"));
+  errorLineMarks = [];
+}
+
+function markErrorLines(locations) {
+  clearErrorMarks();
+  locations.forEach(loc => {
+    if (loc.file !== currentFile) return;
+    const n = Math.max(0, (loc.line || 1) - 1);
+    if (n < editor.lineCount()) {
+      editor.addLineClass(n, "background", "cm-error-line");
+      errorLineMarks.push(n);
+    }
+  });
+}
+
+async function jumpToLocation(file, line) {
+  if (file !== currentFile) await openFile(file);
+  const n = Math.max(0, (line || 1) - 1);
+  editor.setCursor({ line: n, ch: 0 });
+  editor.scrollIntoView({ line: n, ch: 0 }, 120);
+  editor.focus();
+}
+
+// —— Agent-Fix: Fehler vom opencode-Agenten beheben lassen ——
+if (agentFixBtn) agentFixBtn.onclick = async () => {
+  try {
+    const res = await fetch("/api/agent/fix", { method: "POST" });
+    const d = await res.json();
+    if (d.error) {
+      statusEl.textContent = "❌ " + d.error;
+      return;
+    }
+    statusEl.textContent = "🛠 Agent beauftragt — Fortschritt im Terminal";
+  } catch (e) {
+    statusEl.textContent = "❌ Agent-Fix nicht möglich";
+  }
+};
+
+// —— Versions-Snapshots ——
+async function openSnapshots() {
+  try {
+    const res = await fetch("/api/snapshots");
+    const d = await res.json();
+    snapshotListEl.innerHTML = "";
+    const items = d.snapshots || [];
+    snapshotInfoEl.textContent = `${items.length} Versionen`;
+    if (!items.length) {
+      snapshotListEl.textContent = "Noch keine Snapshots — entstehen automatisch beim Kompilieren.";
+      snapshotListEl.style.color = "#888";
+    } else {
+      snapshotListEl.style.color = "";
+      items.forEach(s => {
+        const b = document.createElement("button");
+        b.className = "snap-item";
+        b.textContent = s.id;
+        b.onclick = () => restoreSnapshot(s.id);
+        snapshotListEl.appendChild(b);
+      });
+    }
+    snapshotModal.hidden = false;
+  } catch (e) {
+    statusEl.textContent = "❌ Snapshots nicht ladbar";
+  }
+}
+
+async function restoreSnapshot(id) {
+  if (!confirm(`Version "${id}" wiederherstellen?\nDer aktuelle Stand wird vorher gesichert.`)) return;
+  const res = await fetch("/api/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  const d = await res.json();
+  if (d.error) { alert("Wiederherstellen fehlgeschlagen: " + d.error); return; }
+  snapshotModal.hidden = true;
+  await openFile(currentFile);
+  await compile();
+  statusEl.textContent = `⏪ Wiederhergestellt: ${id} (${d.restored} Dateien)`;
+}
+
+if (snapshotToggleBtn) snapshotToggleBtn.onclick = openSnapshots;
+if (snapshotCloseBtn) snapshotCloseBtn.onclick = () => { snapshotModal.hidden = true; };
+if (snapshotModal) snapshotModal.onclick = (e) => {
+  if (e.target === snapshotModal) snapshotModal.hidden = true;
+};
+if (snapshotNowBtn) snapshotNowBtn.onclick = async () => {
+  const res = await fetch("/api/snapshots", { method: "POST" });
+  const d = await res.json();
+  if (d.ok) { statusEl.textContent = `⏪ Snapshot: ${d.id}`; openSnapshots(); }
+  else statusEl.textContent = "❌ Snapshot fehlgeschlagen";
+};
 
 function hideErrorPanel() {
   if (errorPanel) errorPanel.hidden = true;
@@ -770,6 +908,7 @@ async function reloadTerminal(retries = 3) {
       return;
     }
     frame.src = `http://localhost:${terminalPort}/?t=${Date.now()}`;
+    setTimeout(() => { try { frame.focus(); } catch (_) {} }, 900);
   } catch (e) {
     // Backend nicht erreichbar — trotzdem laden
     frame.src = `http://localhost:${terminalPort}/?t=${Date.now()}`;

@@ -26,5 +26,7 @@ sleep 1.5
 # Fenster dem WHALE-Launcher zuordnen (Icon in Dock/Taskleiste statt Chromium)
 export BAMF_DESKTOP_FILE_HINT="$HOME/.local/share/applications/whale.desktop"
 
-chromium --app="http://127.0.0.1:${LATEX_PORT:-8765}" \
+# --ozone-platform=x11: unter Wayland setzt GNOME sonst das Chromium-Icon
+# (WM_CLASS wird nur unter X11/XWayland korrekt dem WHALE-Launcher zugeordnet)
+chromium --ozone-platform=x11 --app="http://127.0.0.1:${LATEX_PORT:-8765}" \
          --window-size=1500,950 --class=whale

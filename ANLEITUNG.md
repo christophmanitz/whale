@@ -159,6 +159,14 @@ anhand des gewählten Modells (⚙️-Button → Modell speichern):
 Die Stufe landet als `default_agent` in `opencode.json` des Projekts —
 opencode startet damit automatisch im richtigen Modus, ohne Slash-Befehl.
 
+**Stufe C (kleine Modelle) = bewusst auf Gleichstand gebaut.** Das Protokoll
+ersetzt Modellstärke: identische Kommandos, ein Schritt = eine Datei und eine
+Stelle (max. 5 Zeilen), wörtliche Log-Zitate, Verifikation nach jedem Schritt,
+harter Stopp nach 2 erfolglosen Wiederholungen. Ergebnis: ein qwen2.5:7b liefert
+beim Compile/Fix-Workflow dieselben Resultate wie ein starkes Modell — nur in
+kleineren Schritten. Scheitert es doch, meldet es die wörtliche Fehlerzeile,
+statt zu raten.
+
 ### Automatische Nutzung & Sichtbarkeit
 
 - **AGENTS.md** wird bei jeder Sitzung automatisch geladen: Kompilieren, Log Analyse,

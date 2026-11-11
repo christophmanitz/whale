@@ -5,7 +5,7 @@
   <title>WHALE</title>
   <link rel="icon" href="/whale.svg?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="/codemirror.min.css">
-  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="stylesheet" href="/style.css?v=16">
   <link rel="stylesheet" href="/theme-material-darker.min.css">
 </head>
 <body>
@@ -43,6 +43,7 @@
       <button id="pdf-dark-toggle" class="btn-ghost" title="PDF-Vorschau dunkel darstellen (unabhängig vom Editor)">🌓</button>
       <button id="zahlen-toggle" class="btn-ghost" title="Zahlenregister anzeigen/verbergen">🔢</button>
       <button id="agent-settings" class="btn-ghost" title="opencode-Standardmodell für dieses Projekt">⚙️</button>
+      <button id="snapshot-toggle" class="btn-ghost" title="Versions-Snapshots (wiederherstellen)">⏪</button>
     </div>
 
     <span id="status" class="status">Bereit</span>
@@ -63,10 +64,12 @@
     <div class="error-panel" id="error-panel" hidden>
       <div class="error-header">
         <strong>⚠ LaTeX-Fehler</strong>
+        <button id="agent-fix" class="btn btn-sm" title="opencode-Agent beauftragen, die Fehler zu beheben">🛠 Agent fixen</button>
         <button id="error-close" class="btn btn-sm">✕ Schliessen</button>
       </div>
+      <div id="error-locations" class="error-locations"></div>
       <pre id="error-log" class="error-log"></pre>
-      <div class="error-hint">Sage opencode im Terminal: „lies build/compile.log und fixe den Fehler“</div>
+      <div class="error-hint">Klick auf einen Fehlerort springt zur Zeile · 🛠 schickt den Fix-Auftrag an den Agenten</div>
     </div>
   </div>
 
@@ -83,7 +86,21 @@
 
   <!-- Bottom: Terminal (opencode via ttyd) -->
   <div class="terminal-panel">
-    <iframe id="terminal" title="Terminal (opencode)" src="http://localhost:8762"></iframe>
+    <iframe id="terminal" title="Terminal (opencode)"></iframe>
+  </div>
+
+  <!-- Versions-Snapshots -->
+  <div class="zahlen-modal" id="snapshot-modal" hidden>
+    <div class="zahlen-dialog" style="width:min(560px,92vw); max-height:70vh;">
+      <div class="zahlen-header">
+        <strong>⏪ Versionen</strong>
+        <span id="snapshot-info" class="zahlen-source"></span>
+        <button id="snapshot-now" class="btn btn-sm" style="margin-left:auto;">Snapshot jetzt</button>
+        <button id="snapshot-close" class="btn btn-sm">✕</button>
+      </div>
+      <div id="snapshot-list" class="snapshot-list"></div>
+      <div class="zahlen-hint">Automatische Snapshots: vor jedem Compile und bei Agent-Aktivität (max. 1×/45 s, letzte 30 werden behalten).</div>
+    </div>
   </div>
 
   <!-- Agent-Einstellungen: opencode-Standardmodell pro Projekt -->
@@ -99,6 +116,7 @@
           Standard-Modell für dieses Projekt (opencode)
           <select id="agent-model-select" style="width:100%; margin-top:6px; padding:7px; font-size:13px; border:1px solid var(--border); border-radius:4px;"></select>
         </label>
+        <div id="agent-tier-hint" style="font-size:12px; color:#888; line-height:1.5;"></div>
         <div style="font-size:12px; color:#888;">
           Gespeichert in <code>opencode.json</code> im Projektordner — gilt nur für dieses
           Projekt und überschreibt die globale opencode-Config. Das Terminal (opencode)
@@ -138,6 +156,6 @@
   <script src="/pdf.min.js"></script>
   <script src="/codemirror.min.js"></script>
   <script src="/stex.min.js"></script>
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=16"></script>
 </body>
 </html>
