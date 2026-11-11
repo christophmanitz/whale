@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>WHALE</title>
+  <link rel="icon" href="/whale.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/codemirror.min.css">
+  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="stylesheet" href="/theme-material-darker.min.css">
+</head>
+<body>
+
+  <!-- Toolbar -->
+  <header class="topbar">
+    <span class="brand" title="WHALE — Writing Hub for Academic LaTeX Environments&#10;Where ideas take shape."><img src="/whale.svg?v=2" alt="" class="brand-icon">WHALE</span>
+
+    <!-- Projekt -->
+    <div class="toolbar-group" title="Projekt">
+      <select id="project-select" class="project-select" title="Aktives Projekt wählen"></select>
+      <button id="project-create" class="btn-ghost" title="Neues Projekt anlegen">＋</button>
+      <button id="project-import" class="btn-ghost" title="Bestehenden Ordner importieren">📁</button>
+    </div>
+
+    <!-- Datei -->
+    <div class="toolbar-group" title="Datei">
+      <button id="file-new" class="btn-ghost" title="Neue Datei">📄＋</button>
+      <button id="file-del" class="btn-ghost" title="Aktuelle Datei löschen">🗑</button>
+      <button id="file-rename" class="btn-ghost" title="Aktuelle Datei umbenennen">✏️</button>
+    </div>
+
+    <!-- Build -->
+    <div class="toolbar-group">
+      <button id="compile" class="btn">Kompilieren <kbd>Strg+S</kbd></button>
+    </div>
+
+    <!-- Ansicht -->
+    <div class="toolbar-group" title="Ansicht">
+      <button id="font-minus" class="btn-ghost" title="Editor-Schrift kleiner">A−</button>
+      <button id="font-plus" class="btn-ghost" title="Editor-Schrift grösser">A+</button>
+      <button id="term-zoom-out" class="btn-ghost" title="Terminal kleiner">T−</button>
+      <button id="term-zoom-in" class="btn-ghost" title="Terminal grösser">T+</button>
+      <button id="theme-toggle" class="btn-ghost" title="Dark/Light Mode umschalten">🌙</button>
+      <button id="pdf-dark-toggle" class="btn-ghost" title="PDF-Vorschau dunkel darstellen (unabhängig vom Editor)">🌓</button>
+      <button id="zahlen-toggle" class="btn-ghost" title="Zahlenregister anzeigen/verbergen">🔢</button>
+      <button id="agent-settings" class="btn-ghost" title="opencode-Standardmodell für dieses Projekt">⚙️</button>
+    </div>
+
+    <span id="status" class="status">Bereit</span>
+  </header>
+
+  <!-- Left: file tree -->
+  <aside class="filetree">
+    <div class="filetree-header">Dateien</div>
+    <ul id="files"></ul>
+  </aside>
+
+  <!-- Vertical handle: filetree ↔ editor -->
+  <div class="handle-v" id="handle-files"></div>
+  <!-- Center: editor -->
+  <div class="editor-wrap">
+    <textarea id="editor"></textarea>
+    <!-- Error-Panel: Overlay über dem Editor bei Compile-Fehlern -->
+    <div class="error-panel" id="error-panel" hidden>
+      <div class="error-header">
+        <strong>⚠ LaTeX-Fehler</strong>
+        <button id="error-close" class="btn btn-sm">✕ Schliessen</button>
+      </div>
+      <pre id="error-log" class="error-log"></pre>
+      <div class="error-hint">Sage opencode im Terminal: „lies build/compile.log und fixe den Fehler“</div>
+    </div>
+  </div>
+
+  <!-- Vertical handle: editor ↔ pdf -->
+  <div class="handle-v" id="handle-pdf"></div>
+
+  <!-- Right: PDF (full height) -->
+  <div class="pdf-pane">
+    <div id="pdf-container" class="pdf-container"></div>
+  </div>
+
+  <!-- Horizontal handle above terminal -->
+  <div class="handle-h" id="handle-terminal"></div>
+
+  <!-- Bottom: Terminal (opencode via ttyd) -->
+  <div class="terminal-panel">
+    <iframe id="terminal" title="Terminal (opencode)" src="http://localhost:8762"></iframe>
+  </div>
+
+  <!-- Agent-Einstellungen: opencode-Standardmodell pro Projekt -->
+  <div class="zahlen-modal" id="agent-modal" hidden>
+    <div class="zahlen-dialog" style="width:min(580px,92vw); max-height:70vh;">
+      <div class="zahlen-header">
+        <strong>⚙️ Agent-Einstellungen</strong>
+        <span id="agent-project" class="zahlen-source"></span>
+        <button id="agent-close" class="btn btn-sm" style="margin-left:auto;">✕</button>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:12px;">
+        <label style="font-size:13px; color:var(--text);">
+          Standard-Modell für dieses Projekt (opencode)
+          <select id="agent-model-select" style="width:100%; margin-top:6px; padding:7px; font-size:13px; border:1px solid var(--border); border-radius:4px;"></select>
+        </label>
+        <div style="font-size:12px; color:#888;">
+          Gespeichert in <code>opencode.json</code> im Projektordner — gilt nur für dieses
+          Projekt und überschreibt die globale opencode-Config. Das Terminal (opencode)
+          wird nach dem Speichern neu gestartet.
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button id="agent-save" class="btn">Speichern &amp; Agent neu starten</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zahlenregister (per Button ein-/ausblendbar) -->
+  <div class="zahlen-modal" id="zahlen-modal" hidden>
+    <div class="zahlen-dialog">
+      <div class="zahlen-header">
+        <strong>🔢 Zahlenregister</strong>
+        <span id="zahlen-source" class="zahlen-source"></span>
+        <input id="zahlen-filter" placeholder="Filtern (z.B. pauc, rb., cold)…">
+        <button id="zahlen-close" class="btn btn-sm">✕</button>
+      </div>
+      <div class="zahlen-table-wrap">
+        <table class="zahlen-table">
+          <thead>
+            <tr>
+              <th data-sort="key">Schlüssel <span id="zahlen-sort-key"></span></th>
+              <th data-sort="value">Wert <span id="zahlen-sort-value"></span></th>
+            </tr>
+          </thead>
+          <tbody id="zahlen-body"></tbody>
+        </table>
+      </div>
+      <div class="zahlen-hint">Klick = <code>\Z{…}</code> kopieren · Doppelklick = an Cursorposition einfügen · Esc = schliessen</div>
+    </div>
+  </div>
+
+  <script src="/pdf.min.js"></script>
+  <script src="/codemirror.min.js"></script>
+  <script src="/stex.min.js"></script>
+  <script src="/app.js?v=13"></script>
+</body>
+</html>

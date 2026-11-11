@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Nutzerprojekte (LaTeX-Papers) bleiben ausserhalb von Git
+projects/*
+!projects/.gitkeep
+
+# Build-Artefakte
+build/
+*.log
+
+# Icon-Designquelle (abgeleitetes SVG liegt in static/)
+Untitled.png
+
+# OS/Editor
+.DS_Store
